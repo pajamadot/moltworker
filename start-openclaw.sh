@@ -168,6 +168,10 @@ append_env "CLOUDFLARE_AI_GATEWAY_API_KEY"
 append_env "CF_AI_GATEWAY_ACCOUNT_ID"
 append_env "CF_AI_GATEWAY_GATEWAY_ID"
 append_env "CF_AI_GATEWAY_MODEL"
+append_env "OPENCLAW_DEFAULT_MODEL"
+append_env "OPENCLAW_GATEWAY_TOKEN"
+append_env "WORKER_URL"
+append_env "CF_ACCOUNT_ID"
 
 # Optional skill integrations
 append_env "GDM_API_URL"
@@ -259,7 +263,7 @@ config.ui.assistant.avatar = process.env.OPENCLAW_ASSISTANT_AVATAR || 'C';
 // Ensure our packaged skills are enabled by default (do not override explicit disables).
 config.skills = config.skills || {};
 config.skills.entries = config.skills.entries || {};
-for (const name of ['cloudflare-browser', 'clayclaw-memory', 'pajamadot-story', 'story-cli']) {
+for (const name of ['cloudflare-browser', 'clayclaw-memory', 'pajamadot-story', 'story-cli', 'model-switch']) {
     config.skills.entries[name] = config.skills.entries[name] || {};
     if (typeof config.skills.entries[name].enabled !== 'boolean') {
         config.skills.entries[name].enabled = true;
@@ -323,6 +327,39 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
         console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+    }
+}
+
+// Default model override (OPENCLAW_DEFAULT_MODEL=provider/model-id)
+// For direct providers (no Cloudflare AI Gateway). This only applies when
+// CF_AI_GATEWAY_MODEL is NOT set, since that override also creates provider config.
+// Example:
+//   anthropic/claude-3-5-haiku-latest
+if (process.env.OPENCLAW_DEFAULT_MODEL) {
+    if (process.env.CF_AI_GATEWAY_MODEL) {
+        console.log('OPENCLAW_DEFAULT_MODEL is set but CF_AI_GATEWAY_MODEL is also set; ignoring OPENCLAW_DEFAULT_MODEL');
+    } else {
+        const raw = process.env.OPENCLAW_DEFAULT_MODEL;
+        const slashIdx = raw.indexOf('/');
+        const providerName = raw.substring(0, slashIdx);
+        const modelId = raw.substring(slashIdx + 1);
+
+        config.models = config.models || {};
+        config.models.providers = config.models.providers || {};
+        const provider = config.models.providers[providerName];
+        if (!provider) {
+            console.warn('OPENCLAW_DEFAULT_MODEL set but provider not found in config.models.providers: ' + providerName);
+        } else {
+            provider.models = Array.isArray(provider.models) ? provider.models : [];
+            const existing = provider.models.find((m) => m && (m.id === modelId || m.name === modelId));
+            if (!existing) {
+                provider.models.push({ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 });
+            }
+            config.agents = config.agents || {};
+            config.agents.defaults = config.agents.defaults || {};
+            config.agents.defaults.model = { primary: providerName + '/' + modelId };
+            console.log('Default model override: provider=' + providerName + ' model=' + modelId);
+        }
     }
 }
 

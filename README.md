@@ -16,6 +16,7 @@ Keep this section updated when we change user-facing behavior (routes, environme
 - **Gateway startup hardening**: Non-blocking gateway start + short readiness probes (reduces Durable Object lockups), and a time-bounded `openclaw doctor --fix` during container boot.
 - **More channels**: Adds Feishu/Lark support (in addition to Telegram/Discord/Slack), plus pairing endpoints for DM flows.
 - **Agent tooling**: Adds `clayclaw-memory`, `pajamadot-story`, and `story-cli` skills, with wrapper scripts that load `/root/.openclaw/.env` for agent subprocesses.
+- **Model switching**: Adds `OPENCLAW_DEFAULT_MODEL` and a `model-switch` skill for changing the default LLM model without rebuilding; includes a token-gated `POST /api/restart` endpoint for applying changes without Cloudflare Access.
 - **Branding + icons**: ClayClaw title/assistant branding and worker-served favicon/app icons used by the Control UI.
 
 <details>
@@ -525,6 +526,21 @@ This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-g
 
 **Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using - it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
 
+### Direct Provider Model Override (No AI Gateway)
+
+If you're using direct provider keys (for example `ANTHROPIC_API_KEY` without Cloudflare AI Gateway), you can override the default model with `OPENCLAW_DEFAULT_MODEL`:
+
+```bash
+npx wrangler secret put OPENCLAW_DEFAULT_MODEL
+# Enter: anthropic/claude-3-5-haiku-latest
+```
+
+This is ignored when `CF_AI_GATEWAY_MODEL` is set.
+
+### Runtime Switching (No Redeploy)
+
+With R2 persistence enabled, you can switch the default model without redeploying by updating the OpenClaw config and restarting the gateway. This fork includes a `model-switch` skill; see `skills/model-switch/SKILL.md`.
+
 #### Workers AI with Unified Billing
 
 With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), you can use Workers AI models without a separate provider API key - Cloudflare bills you directly. Set `CLOUDFLARE_AI_GATEWAY_API_KEY` to your [AI Gateway authentication token](https://developers.cloudflare.com/ai-gateway/configuration/authentication/) (the `cf-aig-authorization` token).
@@ -541,6 +557,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Yes* | Your Cloudflare account ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
+| `OPENCLAW_DEFAULT_MODEL` | No | Override default model for direct providers: `provider/model-id` (e.g. `anthropic/claude-3-5-haiku-latest`). Ignored when `CF_AI_GATEWAY_MODEL` is set |
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
@@ -576,7 +593,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `GDM_PROJECT_ID` | No | Default Game Dev Memory project UUID |
 | `STORY_TOKEN` | No | PajamaDot Story Platform token (`sp_live_...`) for `story` CLI |
 | `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
-| `WORKER_URL` | No | Public URL of the worker (required for CDP) |
+| `WORKER_URL` | No | Public URL of the worker (required for CDP; also used by token-gated `POST /api/restart` workflows) |
 
 ## Security Considerations
 

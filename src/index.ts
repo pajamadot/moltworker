@@ -263,7 +263,8 @@ function getAccessMiddlewareForRequest(c: Context<AppEnv>) {
 
 app.use('/api/*', async (c, next) => {
   // Keep the public status endpoint unauthenticated.
-  if (new URL(c.req.url).pathname === '/api/status') return next();
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/status' || path === '/api/restart') return next();
   const mw = getAccessMiddlewareForRequest(c);
   return mw(c, next);
 });

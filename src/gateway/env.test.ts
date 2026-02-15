@@ -158,6 +158,14 @@ describe('buildEnvVars', () => {
     expect(result.CF_AI_GATEWAY_MODEL).toBe('workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast');
   });
 
+  it('passes OPENCLAW_DEFAULT_MODEL to container', () => {
+    const env = createMockEnv({
+      OPENCLAW_DEFAULT_MODEL: 'anthropic/claude-3-5-haiku-latest',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENCLAW_DEFAULT_MODEL).toBe('anthropic/claude-3-5-haiku-latest');
+  });
+
   it('passes CF_ACCOUNT_ID to container', () => {
     const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
     const result = buildEnvVars(env);

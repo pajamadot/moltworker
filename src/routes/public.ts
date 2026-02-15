@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess, startMoltbotGateway } from '../gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, startMoltbotGateway } from '../gateway';
 import { TimeoutError, withTimeout } from '../utils/timeout';
 
 /**
@@ -238,6 +238,71 @@ publicRoutes.get('/api/status', async (c) => {
       status: err instanceof TimeoutError ? 'busy' : 'error',
       error: err instanceof Error ? err.message : 'Unknown error',
     });
+  }
+});
+
+// POST /api/restart - Token-gated gateway restart (no Cloudflare Access required)
+//
+// This is intentionally public (to support agent workflows) but requires the gateway token.
+// It mirrors /api/admin/gateway/restart, minus the Access JWT requirement.
+publicRoutes.post('/api/restart', async (c) => {
+  const sandbox = c.get('sandbox');
+  const url = new URL(c.req.url);
+
+  const expectedToken = c.env.MOLTBOT_GATEWAY_TOKEN || '';
+  const tokenParam = url.searchParams.get('token') || '';
+  const auth = c.req.header('Authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice('bearer '.length).trim() : '';
+  const providedToken = (tokenParam || bearer).trim();
+
+  if (!expectedToken || !providedToken || providedToken !== expectedToken) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401);
+  }
+
+  try {
+    // Find and kill the existing gateway process.
+    // Bound the lookup so we don't hang if the sandbox DO is busy.
+    let existingProcess = null;
+    try {
+      existingProcess = await withTimeout(
+        findExistingMoltbotProcess(sandbox),
+        2500,
+        'findExistingMoltbotProcess',
+      );
+    } catch (e) {
+      if (e instanceof TimeoutError) {
+        return c.json({ ok: false, status: 'busy', error: 'sandbox busy' }, 409);
+      }
+      throw e;
+    }
+
+    if (existingProcess) {
+      console.log('[RESTART] Killing existing gateway process:', existingProcess.id);
+      try {
+        await existingProcess.kill();
+      } catch (killErr) {
+        console.error('[RESTART] Error killing process:', killErr);
+      }
+      // Give the sandbox a moment to release the port.
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+
+    // Start a new gateway in the background.
+    const bootPromise = ensureMoltbotGateway(sandbox, c.env).catch((err) => {
+      console.error('[RESTART] Gateway restart failed:', err);
+    });
+    c.executionCtx.waitUntil(bootPromise);
+
+    return c.json({
+      ok: true,
+      status: 'restarting',
+      previousProcessId: existingProcess?.id,
+    });
+  } catch (err) {
+    return c.json(
+      { ok: false, error: err instanceof Error ? err.message : 'Unknown error' },
+      500,
+    );
   }
 });
 
