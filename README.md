@@ -19,7 +19,7 @@ Keep this section updated when we change user-facing behavior (routes, environme
 - **Branding + icons**: ClayClaw title/assistant branding and worker-served favicon/app icons used by the Control UI.
 
 <details>
-<summary>Detailed upstream delta (commits currently ahead of upstream/main)</summary>
+<summary>Detailed upstream delta (key commits ahead of upstream/main)</summary>
 
 #### `8a43496` (2026-02-14) feat: OpenClaw worker upgrades
 
