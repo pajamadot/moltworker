@@ -54,6 +54,12 @@ Keep this section updated when we change user-facing behavior (routes, environme
 
 - Updated the container image to install `@pajamadot/story-cli@0.2.4`.
 
+#### `08858d0` (2026-02-15) feat: model switch skill + token restart
+
+- Added `OPENCLAW_DEFAULT_MODEL` (direct providers) and startup patching support in `start-openclaw.sh`.
+- Added a new built-in `model-switch` skill for switching the default model by editing `openclaw.json` (persisted to R2 when enabled).
+- Added token-gated `POST /api/restart` so workflows can restart the gateway without Cloudflare Access.
+
 #### `8131271` (2026-02-15) docs: document PajamaDot fork changes
 
 - Added a fork-diff summary to the README and a reminder in `AGENTS.md` to keep it current.
