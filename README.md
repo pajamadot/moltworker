@@ -6,7 +6,21 @@ Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly
 
 > **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/moltworker)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pajamadot/moltworker)
+
+## PajamaDot Fork Changes
+
+This repository is a fork of `cloudflare/moltworker`. The upstream project is a minimal proof-of-concept; this fork adds production-focused features and PajamaDot/ClayClaw integrations.
+
+Notable differences from upstream:
+
+- **OpenClaw-first + legacy migration**: Uses `.openclaw/` paths and supports restoring/migrating legacy `.clawdbot/` backups.
+- **Improved cold-start UX**: Public `/api/status` endpoint and a loading page that polls until the gateway is ready (avoids hanging admin/auth flows during container boot).
+- **Auth + ops knobs**: `E2E_TEST_MODE`, public health endpoints, and safer gateway start logic (non-blocking start with readiness probing).
+- **More channels**: Adds Feishu/Lark support (in addition to Telegram/Discord/Slack).
+- **Built-in skills for agents**: Adds `clayclaw-memory`, `pajamadot-story`, and `story-cli` (with wrapper scripts that load `/root/.openclaw/.env` for agent subprocesses).
+- **Hardened container startup**: Writes a runtime `.env`, bounds `openclaw doctor --fix` so startup can't hang forever, and enforces LF line endings for shell scripts via `.gitattributes`.
+- **Branding + icons**: ClayClaw title/assistant branding and worker-served favicon/app icons used by the Control UI.
 
 ## Requirements
 

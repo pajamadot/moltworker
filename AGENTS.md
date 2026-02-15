@@ -104,6 +104,13 @@ When adding new functionality, add corresponding tests.
 
 Development documentation goes in AGENTS.md, not README.md.
 
+### Keeping README Current
+
+When you change user-facing behavior (routes, environment variables, auth flow, startup/persistence behavior, built-in skills), update:
+
+- The **"PajamaDot Fork Changes"** section at the top of `README.md`
+- The **Secrets** table in `README.md` (if you add/rename env vars)
+
 ---
 
 ## Architecture
