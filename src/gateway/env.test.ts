@@ -121,6 +121,26 @@ describe('buildEnvVars', () => {
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });
 
+  it('passes Feishu plugin env vars to container', () => {
+    const env = createMockEnv({
+      FEISHU_APP_ID: 'cli_xxx',
+      FEISHU_APP_SECRET: 'secret',
+      FEISHU_DOMAIN: 'lark',
+      FEISHU_CONNECTION_MODE: 'websocket',
+      FEISHU_DM_POLICY: 'pairing',
+      FEISHU_GROUP_POLICY: 'open',
+      FEISHU_REQUIRE_MENTION: 'true',
+    });
+    const result = buildEnvVars(env);
+    expect(result.FEISHU_APP_ID).toBe('cli_xxx');
+    expect(result.FEISHU_APP_SECRET).toBe('secret');
+    expect(result.FEISHU_DOMAIN).toBe('lark');
+    expect(result.FEISHU_CONNECTION_MODE).toBe('websocket');
+    expect(result.FEISHU_DM_POLICY).toBe('pairing');
+    expect(result.FEISHU_GROUP_POLICY).toBe('open');
+    expect(result.FEISHU_REQUIRE_MENTION).toBe('true');
+  });
+
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',
@@ -142,6 +162,38 @@ describe('buildEnvVars', () => {
     const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
     const result = buildEnvVars(env);
     expect(result.CF_ACCOUNT_ID).toBe('acct-123');
+  });
+
+  it('passes OpenClaw Control UI branding env vars to container', () => {
+    const env = createMockEnv({
+      OPENCLAW_ASSISTANT_NAME: 'ClayClaw',
+      OPENCLAW_ASSISTANT_AVATAR: 'C',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENCLAW_ASSISTANT_NAME).toBe('ClayClaw');
+    expect(result.OPENCLAW_ASSISTANT_AVATAR).toBe('C');
+  });
+
+  it('passes Game Dev Memory env vars to container', () => {
+    const env = createMockEnv({
+      GDM_API_URL: 'https://api-game-dev-memory.pajamadot.com',
+      GDM_API_TOKEN: 'gdm_test_token',
+      GDM_PROJECT_ID: 'proj-123',
+    });
+    const result = buildEnvVars(env);
+    expect(result.GDM_API_URL).toBe('https://api-game-dev-memory.pajamadot.com');
+    expect(result.GDM_API_TOKEN).toBe('gdm_test_token');
+    expect(result.GDM_PROJECT_ID).toBe('proj-123');
+  });
+
+  it('passes Story CLI env vars to container', () => {
+    const env = createMockEnv({
+      STORY_TOKEN: 'sp_live_test',
+      STORY_API_URL: 'https://api.pajamadot.com',
+    });
+    const result = buildEnvVars(env);
+    expect(result.STORY_TOKEN).toBe('sp_live_test');
+    expect(result.STORY_API_URL).toBe('https://api.pajamadot.com');
   });
 
   it('combines all env vars correctly', () => {

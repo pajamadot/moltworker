@@ -1,0 +1,22 @@
+.git
+.github
+.wrangler
+dist
+node_modules
+**/.git
+subrepos
+
+# Local secrets (never send to docker build context)
+secrets.txt
+secrets*.txt
+.dev.vars
+.env
+.env.*
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+
+# Test/output
+coverage
+*.log

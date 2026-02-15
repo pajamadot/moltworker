@@ -2,11 +2,19 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moltbot-sandbox",
   "main": "src/index.ts",
+  "workers_dev": true,
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
   },
+  // Optional custom domain for the worker (requires the zone to be on this Cloudflare account)
+  "routes": [
+    {
+      "pattern": "agent.yuntian.work",
+      "custom_domain": true,
+    },
+  ],
   // Static assets for admin UI (built by vite)
   "assets": {
     "directory": "./dist/client",
@@ -36,6 +44,8 @@
   "containers": [
     {
       "class_name": "Sandbox",
+      // Build the container image from the local Dockerfile.
+      // Note: keep `start-openclaw.sh` as LF (see `.gitattributes`) since the container runs Linux.
       "image": "./Dockerfile",
       "instance_type": "standard-1",
       "max_instances": 1,

@@ -57,10 +57,10 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     }
 
     const teamDomain = c.env.CF_ACCESS_TEAM_DOMAIN;
-    const expectedAud = c.env.CF_ACCESS_AUD;
+    const expectedAudRaw = c.env.CF_ACCESS_AUD;
 
     // Check if CF Access is configured
-    if (!teamDomain || !expectedAud) {
+    if (!teamDomain || !expectedAudRaw) {
       if (type === 'json') {
         return c.json(
           {
@@ -83,6 +83,13 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
         );
       }
     }
+
+    // Support multiple Access apps by allowing CF_ACCESS_AUD to be comma-separated.
+    const expectedAudList = expectedAudRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const expectedAud = expectedAudList.length === 1 ? expectedAudList[0] : expectedAudList;
 
     // Get JWT
     const jwt = extractJWT(c);

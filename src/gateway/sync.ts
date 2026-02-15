@@ -53,7 +53,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Sync config (rclone sync propagates deletions)
   const configResult = await sandbox.exec(
-    `rclone sync ${configDir}/ ${remote('openclaw/')} ${RCLONE_FLAGS} --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**'`,
+    `rclone sync ${configDir}/ ${remote('openclaw/')} ${RCLONE_FLAGS} --exclude='workspace/**' --exclude='skills/**' --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**'`,
     { timeout: 120000 },
   );
   if (!configResult.success) {
@@ -65,14 +65,18 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   }
 
   // Sync workspace (non-fatal, rclone sync propagates deletions)
+  // OpenClaw defaults to /root/.openclaw/workspace; keep a legacy fallback for older images.
   await sandbox.exec(
-    `test -d /root/clawd && rclone sync /root/clawd/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' || true`,
+    `test -d /root/.openclaw/workspace && rclone sync /root/.openclaw/workspace/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='.git/**' --exclude='node_modules/**' || ` +
+      `(test -d /root/clawd && rclone sync /root/clawd/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' --exclude='node_modules/**' || true)`,
     { timeout: 120000 },
   );
 
   // Sync skills (non-fatal)
+  // OpenClaw defaults to /root/.openclaw/skills; keep a legacy fallback for older images.
   await sandbox.exec(
-    `test -d /root/clawd/skills && rclone sync /root/clawd/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || true`,
+    `test -d /root/.openclaw/skills && rclone sync /root/.openclaw/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || ` +
+      `(test -d /root/clawd/skills && rclone sync /root/clawd/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || true)`,
     { timeout: 120000 },
   );
 

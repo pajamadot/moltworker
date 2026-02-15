@@ -61,3 +61,10 @@ test/e2e/.dev.vars
 
 # npm config
 .npmrc
+
+# Local secrets (never commit)
+secrets.txt
+secrets*.txt
+
+# Local subrepo clones (not part of this repo)
+subrepos/

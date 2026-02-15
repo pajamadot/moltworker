@@ -36,6 +36,26 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
 # DISCORD_BOT_TOKEN=optional
+# SLACK_BOT_TOKEN=optional
+# SLACK_APP_TOKEN=optional
+#
+# Feishu/Lark (optional)
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=xxx
+# FEISHU_DOMAIN=lark           # or "feishu" for CN
+# FEISHU_CONNECTION_MODE=websocket
+# FEISHU_DM_POLICY=pairing
+# FEISHU_GROUP_POLICY=open
+# FEISHU_REQUIRE_MENTION=true
+
+# Game Dev Memory (optional)
+# GDM_API_TOKEN=gdm_...
+# GDM_API_URL=https://api-game-dev-memory.pajamadot.com
+# GDM_PROJECT_ID=uuid
+
+# PajamaDot Story CLI (optional)
+# STORY_TOKEN=sp_live_...
+# STORY_API_URL=https://api.pajamadot.com
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth

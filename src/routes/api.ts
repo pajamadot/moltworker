@@ -7,9 +7,27 @@ import {
   syncToR2,
   waitForProcess,
 } from '../gateway';
+import { TimeoutError } from '../utils/timeout';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
-const CLI_TIMEOUT_MS = 20000;
+const CLI_TIMEOUT_MS = 30000;
+
+const PAIRING_CHANNEL_ALLOWLIST = new Set(['discord', 'telegram', 'slack', 'feishu']);
+
+function normalizePairingChannel(input: string | undefined): string | null {
+  if (!input) return null;
+  const channel = input.toLowerCase();
+  if (!PAIRING_CHANNEL_ALLOWLIST.has(channel)) return null;
+  return channel;
+}
+
+function normalizePairingCode(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const code = input.trim();
+  // Prevent shell injection: pairing codes are short alphanumeric strings.
+  if (!/^[A-Za-z0-9_-]{3,64}$/.test(code)) return null;
+  return code;
+}
 
 /**
  * API routes
@@ -105,7 +123,7 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     const stderr = logs.stderr || '';
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
-    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+    const success = stdout.toLowerCase().includes('approved');
 
     return c.json({
       success,
@@ -169,8 +187,7 @@ adminApi.post('/devices/approve-all', async (c) => {
 
         // eslint-disable-next-line no-await-in-loop
         const approveLogs = await approveProc.getLogs();
-        const success =
-          approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
+        const success = approveLogs.stdout?.toLowerCase().includes('approved') === true;
 
         results.push({ requestId: device.requestId, success });
       } catch (err) {
@@ -187,6 +204,102 @@ adminApi.post('/devices/approve-all', async (c) => {
       approved: results.filter((r) => r.success).map((r) => r.requestId),
       failed: results.filter((r) => !r.success),
       message: `Approved ${approvedCount} of ${pending.length} device(s)`,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/pairing/:channel - List pending DM pairing requests for a channel (discord/telegram/slack)
+adminApi.get('/pairing/:channel', async (c) => {
+  const sandbox = c.get('sandbox');
+  const channel = normalizePairingChannel(c.req.param('channel'));
+
+  if (!channel) {
+    return c.json({ error: 'Invalid channel. Use one of: discord, telegram, slack, feishu' }, 400);
+  }
+
+  try {
+    // Ensure OpenClaw is running/configured first.
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    // Pairing CLI is local (does not require --url/--token like "devices" commands).
+    const proc = await sandbox.startProcess(`openclaw pairing list --json --channel ${channel}`);
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    try {
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[0]);
+        return c.json(data);
+      }
+    } catch {
+      // fall through to raw output
+    }
+
+    return c.json({
+      channel,
+      requests: [],
+      raw: stdout,
+      stderr,
+      parseError: 'Failed to parse CLI output',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /api/admin/pairing/:channel/approve - Approve a DM pairing code for a channel
+adminApi.post('/pairing/:channel/approve', async (c) => {
+  const sandbox = c.get('sandbox');
+  const channel = normalizePairingChannel(c.req.param('channel'));
+
+  if (!channel) {
+    return c.json({ error: 'Invalid channel. Use one of: discord, telegram, slack, feishu' }, 400);
+  }
+
+  let body: unknown = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    // ignore
+  }
+
+  const code = normalizePairingCode((body as { code?: unknown }).code);
+  const notify = (body as { notify?: unknown }).notify === true;
+
+  if (!code) {
+    return c.json({ error: 'code is required (alphanumeric, 3-64 chars)' }, 400);
+  }
+
+  try {
+    // Ensure OpenClaw is running/configured first.
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const notifyArg = notify ? ' --notify' : '';
+    // Pairing CLI is local (does not require --url/--token like "devices" commands).
+    const proc = await sandbox.startProcess(`openclaw pairing approve ${channel} ${code}${notifyArg}`);
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    const success = stdout.toLowerCase().includes('approved') && !stderr.toLowerCase().includes('failed');
+
+    return c.json({
+      success,
+      channel,
+      code,
+      message: success ? 'Pairing approved' : 'Approval may have failed',
+      stdout,
+      stderr,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -263,7 +376,16 @@ adminApi.post('/gateway/restart', async (c) => {
 
   try {
     // Find and kill the existing gateway process
-    const existingProcess = await findExistingMoltbotProcess(sandbox);
+    let existingProcess = null;
+    try {
+      existingProcess = await findExistingMoltbotProcess(sandbox);
+    } catch (e) {
+      if (e instanceof TimeoutError) {
+        console.log('[admin] listProcesses timed out; proceeding with restart without killing');
+      } else {
+        throw e;
+      }
+    }
 
     if (existingProcess) {
       console.log('Killing existing gateway process:', existingProcess.id);

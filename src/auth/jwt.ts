@@ -16,7 +16,7 @@ import type { JWTPayload } from '../types';
 export async function verifyAccessJWT(
   token: string,
   teamDomain: string,
-  expectedAud: string,
+  expectedAud: string | string[],
 ): Promise<JWTPayload> {
   // Ensure teamDomain has https:// prefix for issuer check
   const issuer = teamDomain.startsWith('https://') ? teamDomain : `https://${teamDomain}`;

@@ -161,6 +161,52 @@
   color: var(--text-muted);
 }
 
+/* Pairing section */
+.pairing-section {
+  border-left: 3px solid rgba(251, 191, 36, 0.8);
+}
+
+.pairing-section .hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.pairing-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.pairing-code-input {
+  flex: 1;
+  min-width: 220px;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+}
+
+.pairing-requests {
+  margin-top: 1rem;
+}
+
+.pairing-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: rgba(0, 0, 0, 0.18);
+  max-height: 260px;
+  overflow: auto;
+  font-size: 0.8rem;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

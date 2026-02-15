@@ -21,14 +21,16 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
+import { findExistingMoltbotProcess, startMoltbotGateway } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
+import { TimeoutError } from './utils/timeout';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -41,10 +43,58 @@ function transformErrorMessage(message: string, host: string): string {
   }
 
   if (message.includes('pairing required')) {
-    return `Pairing required. Visit https://${host}/_admin/`;
+    return `Pairing required. Approve this device at https://${host}/_admin/ then refresh this page.`;
   }
 
   return message;
+}
+
+function hasCloudflareAccessSession(request: Request): boolean {
+  // If the user put Cloudflare Access in front of the Control UI (root),
+  // the browser will include either the assertion header (rare) or the cookie.
+  if (request.headers.get('CF-Access-JWT-Assertion')) return true;
+  const cookie = request.headers.get('Cookie') || '';
+  return cookie.includes('CF_Authorization=');
+}
+
+function buildForwardedHeaders(request: Request, url: URL): Headers {
+  const headers = new Headers(request.headers);
+
+  // Preserve original client IP for services behind the sandbox proxy (OpenClaw pairing, logs, etc).
+  // Cloudflare adds CF-Connecting-IP; ensure X-Forwarded-For is present for typical proxy stacks.
+  if (!headers.has('x-forwarded-for')) {
+    const cfIp = headers.get('cf-connecting-ip');
+    if (cfIp) headers.set('x-forwarded-for', cfIp);
+  }
+  if (!headers.has('x-forwarded-proto')) {
+    headers.set('x-forwarded-proto', url.protocol.replace(':', ''));
+  }
+  if (!headers.has('x-forwarded-host')) {
+    headers.set('x-forwarded-host', url.host);
+  }
+
+  return headers;
+}
+
+function cloneResponseWithHeaders(resp: Response, extra: Record<string, string>): Response {
+  const headers = new Headers(resp.headers);
+  for (const [k, v] of Object.entries(extra)) headers.set(k, v);
+
+  // Preserve multi-value Set-Cookie (Cloudflare Workers supports Headers.getSetCookie()).
+  const getSetCookie = (resp.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+  if (typeof getSetCookie === 'function') {
+    const cookies = getSetCookie.call(resp.headers as unknown as Headers);
+    if (Array.isArray(cookies) && cookies.length > 0) {
+      headers.delete('set-cookie');
+      for (const c of cookies) headers.append('set-cookie', c);
+    }
+  }
+
+  return new Response(resp.body, {
+    status: resp.status,
+    statusText: resp.statusText,
+    headers,
+  });
 }
 
 export { Sandbox };
@@ -195,16 +245,34 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-// Middleware: Cloudflare Access authentication for protected routes
-app.use('*', async (c, next) => {
-  // Determine response type based on Accept header
+// Cloudflare Access authentication for protected routes.
+//
+// Important: We intentionally do NOT protect the Control UI (catch-all proxy)
+// with Cloudflare Access here. The gateway is already protected by:
+// - MOLTBOT_GATEWAY_TOKEN (required for remote access)
+// - device pairing (default)
+//
+// We only require Cloudflare Access for administrative surfaces.
+function getAccessMiddlewareForRequest(c: Context<AppEnv>) {
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
-  const middleware = createAccessMiddleware({
+  return createAccessMiddleware({
     type: acceptsHtml ? 'html' : 'json',
     redirectOnMissing: acceptsHtml,
   });
+}
 
-  return middleware(c, next);
+app.use('/api/*', async (c, next) => {
+  // Keep the public status endpoint unauthenticated.
+  if (new URL(c.req.url).pathname === '/api/status') return next();
+  const mw = getAccessMiddlewareForRequest(c);
+  return mw(c, next);
+});
+
+app.use('/_admin/*', async (c, next) => {
+  // Static assets are public so the admin SPA can load during auth flows.
+  if (new URL(c.req.url).pathname.startsWith('/_admin/assets/')) return next();
+  const mw = getAccessMiddlewareForRequest(c);
+  return mw(c, next);
 });
 
 // Mount API routes (protected by Cloudflare Access)
@@ -218,7 +286,8 @@ app.use('/debug/*', async (c, next) => {
   if (c.env.DEBUG_ROUTES !== 'true') {
     return c.json({ error: 'Debug routes are disabled' }, 404);
   }
-  return next();
+  const mw = getAccessMiddlewareForRequest(c);
+  return mw(c, next);
 });
 app.route('/debug', debug);
 
@@ -233,47 +302,60 @@ app.all('*', async (c) => {
 
   console.log('[PROXY] Handling request:', url.pathname);
 
-  // Check if gateway is already running
-  const existingProcess = await findExistingMoltbotProcess(sandbox);
-  const isGatewayReady = existingProcess !== null && existingProcess.status === 'running';
+  // Check if a gateway process exists AND is actually listening.
+  // Important: only using proc.status ("running") is not sufficient; we can have a stuck process.
+  let existingProcess = null;
+  let sandboxBusy = false;
+  try {
+    existingProcess = await findExistingMoltbotProcess(sandbox);
+  } catch (e) {
+    if (e instanceof TimeoutError) {
+      sandboxBusy = true;
+    } else {
+      throw e;
+    }
+  }
+  let isGatewayReady = false;
+  if (existingProcess) {
+    try {
+      // Use a very short probe. Long-running waitForPort calls can block the Sandbox durable object
+      // and make /api/status hang, which freezes the loading page.
+      await existingProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 500 });
+      isGatewayReady = true;
+    } catch {
+      isGatewayReady = false;
+    }
+  }
 
   // For browser requests (non-WebSocket, non-API), show loading page if gateway isn't ready
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
 
-  if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
-    console.log('[PROXY] Gateway not ready, serving loading page');
+  if (!isGatewayReady) {
+    console.log('[PROXY] Gateway not ready, triggering background start');
 
-    // Start the gateway in the background (don't await)
-    c.executionCtx.waitUntil(
-      ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
-        console.error('[PROXY] Background gateway start failed:', err);
-      }),
-    );
-
-    // Return the loading page immediately
-    return c.html(loadingPageHtml);
-  }
-
-  // Ensure moltbot is running (this will wait for startup)
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-  } catch (error) {
-    console.error('[PROXY] Failed to start Moltbot:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY) {
-      hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
-    } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
-      hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
+    // Start the gateway in the background (non-blocking), unless the sandbox is currently busy
+    // (e.g. another request is starting the container). Starting again is usually safe, but can
+    // create noisy duplicate starts under load.
+    if (!sandboxBusy) {
+      c.executionCtx.waitUntil(
+        startMoltbotGateway(sandbox, c.env).catch((err: Error) => {
+          console.error('[PROXY] Background gateway start failed:', err);
+        }),
+      );
     }
 
+    if (!isWebSocketRequest && acceptsHtml) {
+      // Return the loading page immediately (it polls /api/status).
+      return c.html(loadingPageHtml);
+    }
+
+    // Non-HTML requests (including WebSocket handshakes) should fail fast while the gateway boots.
     return c.json(
       {
-        error: 'Moltbot gateway failed to start',
-        details: errorMessage,
-        hint,
+        error: 'Gateway is starting',
+        status: 'starting',
+        hint: 'Wait ~1-2 minutes, then retry. You can also open /_admin/ and restart the gateway.',
       },
       503,
     );
@@ -289,15 +371,23 @@ app.all('*', async (c) => {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
 
-    // Inject gateway token into WebSocket request if not already present.
-    // CF Access redirects strip query params, so authenticated users lose ?token=.
-    // Since the user already passed CF Access auth, we inject the token server-side.
-    let wsRequest = request;
-    if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
-      const tokenUrl = new URL(url.toString());
-      tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
-      wsRequest = new Request(tokenUrl.toString(), request);
+    // If the Control UI is protected by Cloudflare Access, the login redirect can drop query params
+    // like ?token=... . To keep token auth working in that setup, inject the gateway token ONLY
+    // when we detect an active Access session (cookie/header present).
+    const wsUrl = new URL(url.toString());
+    if (
+      c.env.MOLTBOT_GATEWAY_TOKEN &&
+      !wsUrl.searchParams.has('token') &&
+      hasCloudflareAccessSession(request)
+    ) {
+      wsUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
     }
+
+    const wsHeaders = buildForwardedHeaders(request, wsUrl);
+    const wsRequest = new Request(wsUrl.toString(), {
+      method: request.method,
+      headers: wsHeaders,
+    });
 
     // Get WebSocket connection to the container
     const containerResponse = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
@@ -429,19 +519,46 @@ app.all('*', async (c) => {
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
-  const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
+
+  // Same rationale as WebSocket injection above: only auto-inject token for Access-protected setups.
+  const proxyUrl = new URL(url.toString());
+  if (
+    c.env.MOLTBOT_GATEWAY_TOKEN &&
+    !proxyUrl.searchParams.has('token') &&
+    hasCloudflareAccessSession(request)
+  ) {
+    proxyUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
+  }
+
+  const proxyHeaders = buildForwardedHeaders(request, proxyUrl);
+  const proxyRequest = new Request(proxyUrl.toString(), {
+    method: request.method,
+    headers: proxyHeaders,
+    body: request.body,
+    redirect: 'manual',
+  });
+
+  const httpResponse = await sandbox.containerFetch(proxyRequest, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
 
-  // Add debug header to verify worker handled the request
-  const newHeaders = new Headers(httpResponse.headers);
-  newHeaders.set('X-Worker-Debug', 'proxy-to-moltbot');
-  newHeaders.set('X-Debug-Path', url.pathname);
+  const debugHeaders = { 'X-Worker-Debug': 'proxy-to-moltbot', 'X-Debug-Path': url.pathname };
 
-  return new Response(httpResponse.body, {
-    status: httpResponse.status,
-    statusText: httpResponse.statusText,
-    headers: newHeaders,
-  });
+  // Rewrite Control UI HTML for branding (title only; icons are served by worker routes).
+  // Use HTMLRewriter to avoid breaking headers like Set-Cookie that some browsers use to persist device identity.
+  const contentType = httpResponse.headers.get('content-type') || '';
+  if (contentType.includes('text/html')) {
+    const rewriter = new HTMLRewriter().on('title', {
+      element(el) {
+        el.setInnerContent('ClayClaw Control');
+      },
+    });
+    const transformed = rewriter.transform(httpResponse);
+    const resp = cloneResponseWithHeaders(transformed, debugHeaders);
+    resp.headers.delete('content-length');
+    return resp;
+  }
+
+  return cloneResponseWithHeaders(httpResponse, debugHeaders);
 });
 
 export default {

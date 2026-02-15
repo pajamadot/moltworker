@@ -137,3 +137,37 @@ export async function triggerSync(): Promise<SyncResponse> {
     method: 'POST',
   });
 }
+
+export interface PairingListResponse {
+  channel: string;
+  requests: unknown[];
+  raw?: string;
+  stderr?: string;
+  parseError?: string;
+  error?: string;
+}
+
+export async function listPairingRequests(channel: string): Promise<PairingListResponse> {
+  return apiRequest<PairingListResponse>(`/pairing/${encodeURIComponent(channel)}`);
+}
+
+export interface PairingApproveResponse {
+  success: boolean;
+  channel: string;
+  code: string;
+  message?: string;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+}
+
+export async function approvePairingCode(
+  channel: string,
+  code: string,
+  notify: boolean = true,
+): Promise<PairingApproveResponse> {
+  return apiRequest<PairingApproveResponse>(`/pairing/${encodeURIComponent(channel)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ code, notify }),
+  });
+}

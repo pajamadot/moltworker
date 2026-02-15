@@ -30,9 +30,32 @@ export interface MoltbotEnv {
   DISCORD_DM_POLICY?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
+  // Feishu/Lark plugin (optional)
+  FEISHU_APP_ID?: string;
+  FEISHU_APP_SECRET?: string;
+  FEISHU_DOMAIN?: string; // "feishu" (CN), "lark" (Intl), or custom URL
+  FEISHU_CONNECTION_MODE?: string; // "websocket" (default) or "webhook"
+  FEISHU_DM_POLICY?: string; // "pairing" | "open" | "allowlist"
+  FEISHU_GROUP_POLICY?: string; // "open" | "allowlist" | "disabled"
+  FEISHU_REQUIRE_MENTION?: string; // "true" | "false"
+  // OpenClaw Control UI branding (optional)
+  OPENCLAW_ASSISTANT_NAME?: string; // e.g. "ClayClaw"
+  OPENCLAW_ASSISTANT_AVATAR?: string; // e.g. "C" (single character)
+  // Game Dev Memory (optional, for ClayClaw memory skill)
+  GDM_API_URL?: string; // defaults to https://api-game-dev-memory.pajamadot.com
+  GDM_API_TOKEN?: string; // Bearer token: gdm_...
+  GDM_PROJECT_ID?: string; // Default project for memory ops
+  // PajamaDot Story CLI (optional)
+  STORY_TOKEN?: string; // Bearer token: sp_live_...
+  STORY_API_URL?: string; // Override API URL (default: https://api.pajamadot.com)
+  STORY_ASSET_URL?: string;
+  STORY_GENERATION_URL?: string;
+  STORY_AUTH_URL?: string;
+  STORY_CDN_URL?: string;
+  STORY_OAUTH_CALLBACK_TIMEOUT_SECS?: string;
   // Cloudflare Access configuration for admin routes
   CF_ACCESS_TEAM_DOMAIN?: string; // e.g., 'myteam.cloudflareaccess.com'
-  CF_ACCESS_AUD?: string; // Application Audience (AUD) tag
+  CF_ACCESS_AUD?: string; // Application Audience (AUD) tag (comma-separated list supported)
   // R2 credentials for bucket mounting (set via wrangler secret)
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;

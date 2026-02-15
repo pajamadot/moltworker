@@ -3,6 +3,8 @@ import {
   listDevices,
   approveDevice,
   approveAllDevices,
+  listPairingRequests,
+  approvePairingCode,
   restartGateway,
   getStorageStatus,
   triggerSync,
@@ -11,6 +13,7 @@ import {
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
+  type PairingListResponse,
 } from '../api';
 import './AdminPage.css';
 
@@ -49,6 +52,14 @@ export default function AdminPage() {
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null);
+  const [discordPairing, setDiscordPairing] = useState<PairingListResponse | null>(null);
+  const [feishuPairing, setFeishuPairing] = useState<PairingListResponse | null>(null);
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingApproveLoading, setPairingApproveLoading] = useState(false);
+  const [feishuPairingCode, setFeishuPairingCode] = useState('');
+  const [feishuPairingLoading, setFeishuPairingLoading] = useState(false);
+  const [feishuPairingApproveLoading, setFeishuPairingApproveLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -88,10 +99,47 @@ export default function AdminPage() {
     }
   }, []);
 
+  const fetchDiscordPairing = useCallback(async () => {
+    setPairingLoading(true);
+    try {
+      const data = await listPairingRequests('discord');
+      setDiscordPairing(data);
+    } catch (err) {
+      console.error('Failed to fetch pairing requests:', err);
+      // Keep pairing errors separate from the main banner; show them inline.
+      setDiscordPairing({
+        channel: 'discord',
+        requests: [],
+        error: err instanceof Error ? err.message : 'Failed to fetch pairing requests',
+      });
+    } finally {
+      setPairingLoading(false);
+    }
+  }, []);
+
+  const fetchFeishuPairing = useCallback(async () => {
+    setFeishuPairingLoading(true);
+    try {
+      const data = await listPairingRequests('feishu');
+      setFeishuPairing(data);
+    } catch (err) {
+      console.error('Failed to fetch pairing requests:', err);
+      setFeishuPairing({
+        channel: 'feishu',
+        requests: [],
+        error: err instanceof Error ? err.message : 'Failed to fetch pairing requests',
+      });
+    } finally {
+      setFeishuPairingLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
     fetchStorageStatus();
-  }, [fetchDevices, fetchStorageStatus]);
+    fetchDiscordPairing();
+    fetchFeishuPairing();
+  }, [fetchDevices, fetchStorageStatus, fetchDiscordPairing, fetchFeishuPairing]);
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId);
@@ -172,6 +220,50 @@ export default function AdminPage() {
     }
   };
 
+  const handleApproveDiscordPairing = async () => {
+    const code = pairingCode.trim();
+    if (!code) return;
+
+    setPairingApproveLoading(true);
+    try {
+      const result = await approvePairingCode('discord', code, true);
+      if (!result.success) {
+        setDiscordPairing((prev) => (prev ? { ...prev, error: result.error || result.message } : prev));
+      } else {
+        setPairingCode('');
+        await fetchDiscordPairing();
+      }
+    } catch (err) {
+      setDiscordPairing((prev) => (prev ? { ...prev, error: err instanceof Error ? err.message : 'Approval failed' } : prev));
+    } finally {
+      setPairingApproveLoading(false);
+    }
+  };
+
+  const handleApproveFeishuPairing = async () => {
+    const code = feishuPairingCode.trim();
+    if (!code) return;
+
+    setFeishuPairingApproveLoading(true);
+    try {
+      const result = await approvePairingCode('feishu', code, true);
+      if (!result.success) {
+        setFeishuPairing((prev) =>
+          prev ? { ...prev, error: result.error || result.message } : prev,
+        );
+      } else {
+        setFeishuPairingCode('');
+        await fetchFeishuPairing();
+      }
+    } catch (err) {
+      setFeishuPairing((prev) =>
+        prev ? { ...prev, error: err instanceof Error ? err.message : 'Approval failed' } : prev,
+      );
+    } finally {
+      setFeishuPairingApproveLoading(false);
+    }
+  };
+
   return (
     <div className="devices-page">
       {error && (
@@ -247,6 +339,124 @@ export default function AdminPage() {
         </p>
       </section>
 
+      <section className="devices-section pairing-section">
+        <div className="section-header">
+          <h2>Discord DM Pairing</h2>
+          <button
+            className="btn btn-secondary"
+            onClick={fetchDiscordPairing}
+            disabled={pairingLoading}
+          >
+            {pairingLoading && <ButtonSpinner />}
+            {pairingLoading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+
+        <p className="hint">
+          If you set <code>DISCORD_DM_POLICY=pairing</code>, Discord DMs require a pairing code. DM the bot, copy the code it replies with, then approve it here.
+          If you want to skip pairing (less secure), set <code>DISCORD_DM_POLICY=open</code> and restart the gateway.
+        </p>
+
+        <div className="pairing-controls">
+          <input
+            className="pairing-code-input"
+            value={pairingCode}
+            onChange={(e) => setPairingCode(e.target.value)}
+            placeholder="Pairing code (e.g. ABC123)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleApproveDiscordPairing();
+            }}
+          />
+          <button
+            className="btn btn-success"
+            onClick={() => void handleApproveDiscordPairing()}
+            disabled={pairingApproveLoading || pairingCode.trim() === ''}
+          >
+            {pairingApproveLoading && <ButtonSpinner />}
+            {pairingApproveLoading ? 'Approving...' : 'Approve'}
+          </button>
+        </div>
+
+        {discordPairing?.error && (
+          <div className="error-banner">
+            <span>{discordPairing.error}</span>
+            <button onClick={() => setDiscordPairing(null)} className="dismiss-btn">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+      {discordPairing && (
+          <div className="pairing-requests">
+            <div className="pairing-meta">
+              <span>Pending requests: {discordPairing.requests?.length ?? 0}</span>
+            </div>
+            {Array.isArray(discordPairing.requests) && discordPairing.requests.length > 0 && (
+              <pre className="pairing-pre">{JSON.stringify(discordPairing.requests, null, 2)}</pre>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="devices-section pairing-section">
+        <div className="section-header">
+          <h2>Feishu/Lark DM Pairing</h2>
+          <button
+            className="btn btn-secondary"
+            onClick={fetchFeishuPairing}
+            disabled={feishuPairingLoading}
+          >
+            {feishuPairingLoading && <ButtonSpinner />}
+            {feishuPairingLoading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+
+        <p className="hint">
+          If you set <code>FEISHU_DM_POLICY=pairing</code>, Feishu DMs require a pairing code. DM the bot, copy the code it replies with, then approve it here.
+          If you want to skip pairing (less secure), set <code>FEISHU_DM_POLICY=open</code> and restart the gateway.
+        </p>
+
+        <div className="pairing-controls">
+          <input
+            className="pairing-code-input"
+            value={feishuPairingCode}
+            onChange={(e) => setFeishuPairingCode(e.target.value)}
+            placeholder="Pairing code (e.g. ABC123)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleApproveFeishuPairing();
+            }}
+          />
+          <button
+            className="btn btn-success"
+            onClick={() => void handleApproveFeishuPairing()}
+            disabled={feishuPairingApproveLoading || feishuPairingCode.trim() === ''}
+          >
+            {feishuPairingApproveLoading && <ButtonSpinner />}
+            {feishuPairingApproveLoading ? 'Approving...' : 'Approve'}
+          </button>
+        </div>
+
+        {feishuPairing?.error && (
+          <div className="error-banner">
+            <span>{feishuPairing.error}</span>
+            <button onClick={() => setFeishuPairing(null)} className="dismiss-btn">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {feishuPairing && (
+          <div className="pairing-requests">
+            <div className="pairing-meta">
+              <span>Pending requests: {feishuPairing.requests?.length ?? 0}</span>
+            </div>
+            {Array.isArray(feishuPairing.requests) && feishuPairing.requests.length > 0 && (
+              <pre className="pairing-pre">{JSON.stringify(feishuPairing.requests, null, 2)}</pre>
+            )}
+          </div>
+        )}
+      </section>
+
       {loading ? (
         <div className="loading">
           <div className="spinner"></div>
@@ -275,6 +485,13 @@ export default function AdminPage() {
                 </button>
               </div>
             </div>
+            <p className="hint">
+              After approving a device, refresh the Control UI tab at{' '}
+              <a href="/" target="_blank" rel="noreferrer">
+                /
+              </a>
+              .
+            </p>
 
             {pending.length === 0 ? (
               <div className="empty-state">

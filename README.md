@@ -80,6 +80,18 @@ echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 npm run deploy
 ```
 
+PowerShell (Windows) token generation alternative:
+
+```powershell
+# Generate a random 32-byte hex token (64 hex chars)
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$token = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+
+$token | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
+Write-Host "Your gateway token: $token"
+```
+
 After deploying, open the Control UI with your token:
 
 ```
@@ -125,6 +137,14 @@ After enabling Cloudflare Access, set the secrets so the worker can validate JWT
 npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
 
 # The Application Audience (AUD) tag from your Access application that you copied in the step above
+npx wrangler secret put CF_ACCESS_AUD
+```
+
+If you have **multiple** Access applications pointing at the same Worker (common when you use both `workers.dev` and a custom domain), set `CF_ACCESS_AUD` to a comma-separated list of AUD values, for example:
+
+```bash
+# Example format (no spaces required):
+# AUD1,AUD2
 npx wrangler secret put CF_ACCESS_AUD
 ```
 
@@ -286,6 +306,22 @@ npx wrangler secret put SLACK_APP_TOKEN
 npm run deploy
 ```
 
+### Feishu / Lark
+
+```bash
+npx wrangler secret put FEISHU_APP_ID
+npx wrangler secret put FEISHU_APP_SECRET
+
+# Optional config:
+# npx wrangler secret put FEISHU_DOMAIN            # "lark" (Intl) or "feishu" (CN)
+# npx wrangler secret put FEISHU_CONNECTION_MODE  # "websocket" (default) or "webhook"
+# npx wrangler secret put FEISHU_DM_POLICY        # "pairing" (default) or "open"
+# npx wrangler secret put FEISHU_GROUP_POLICY     # "open" (default) or "disabled"
+# npx wrangler secret put FEISHU_REQUIRE_MENTION  # "true" (default) or "false"
+
+npm run deploy
+```
+
 ## Optional: Browser Automation (CDP)
 
 This worker includes a Chrome DevTools Protocol (CDP) shim that enables browser automation capabilities. This allows OpenClaw to control a headless browser for tasks like web scraping, screenshots, and automated testing.
@@ -325,7 +361,7 @@ All endpoints require authentication via the `?secret=<CDP_SECRET>` query parame
 
 ## Built-in Skills
 
-The container includes pre-installed skills in `/root/clawd/skills/`:
+The container includes pre-installed skills in `/root/.openclaw/skills/`:
 
 ### cloudflare-browser
 
@@ -339,13 +375,45 @@ Browser automation via the CDP shim. Requires `CDP_SECRET` and `WORKER_URL` to b
 **Usage:**
 ```bash
 # Screenshot
-node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
+node /root/.openclaw/skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
 
 # Video from multiple URLs
-node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
+node /root/.openclaw/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
 ```
 
 See `skills/cloudflare-browser/SKILL.md` for full documentation.
+
+### clayclaw-memory
+
+Durable “memory” via Game Dev Memory (projects + memories). Requires:
+
+- `GDM_API_TOKEN`
+- Optional: `GDM_API_URL`, `GDM_PROJECT_ID`
+
+See `skills/clayclaw-memory/SKILL.md` for usage.
+
+### pajamadot-story
+
+Manage PajamaDot Story projects from inside the container via the `story` CLI. Requires:
+
+- `STORY_TOKEN`
+
+See `skills/pajamadot-story/SKILL.md` for usage.
+
+### story-cli
+
+Interact with the PajamaDot Story Platform from inside the container using the `story` CLI. Requires:
+
+- `STORY_TOKEN` (recommended for headless/agent usage)
+
+Examples:
+
+```bash
+story project list --json
+story story list --json
+```
+
+See `skills/story-cli/SKILL.md` for usage.
 
 ## Optional: Cloudflare AI Gateway
 
@@ -425,6 +493,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
 | `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
+| `E2E_TEST_MODE` | No | Set to `true` to skip CF Access auth but keep device pairing (useful for E2E tests) |
 | `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |
 | `R2_ACCESS_KEY_ID` | No | R2 access key for persistent storage |
@@ -436,6 +505,19 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `DISCORD_DM_POLICY` | No | Discord DM policy: `pairing` (default) or `open` |
 | `SLACK_BOT_TOKEN` | No | Slack bot token |
 | `SLACK_APP_TOKEN` | No | Slack app token |
+| `FEISHU_APP_ID` | No | Feishu/Lark app ID |
+| `FEISHU_APP_SECRET` | No | Feishu/Lark app secret |
+| `FEISHU_DOMAIN` | No | Feishu domain: `lark` (Intl), `feishu` (CN), or custom URL |
+| `FEISHU_CONNECTION_MODE` | No | Feishu connection mode: `websocket` (default) or `webhook` |
+| `FEISHU_DM_POLICY` | No | Feishu DM policy: `pairing` (default) or `open` |
+| `FEISHU_GROUP_POLICY` | No | Feishu group policy: `open` (default) or `disabled` |
+| `FEISHU_REQUIRE_MENTION` | No | Feishu require mention: `true` (default) or `false` |
+| `OPENCLAW_ASSISTANT_NAME` | No | Control UI assistant display name (e.g. `ClayClaw`) |
+| `OPENCLAW_ASSISTANT_AVATAR` | No | Control UI assistant avatar initial (single character) |
+| `GDM_API_URL` | No | Game Dev Memory API base URL (defaults to `https://api-game-dev-memory.pajamadot.com`) |
+| `GDM_API_TOKEN` | No | Game Dev Memory API token (`gdm_...`) |
+| `GDM_PROJECT_ID` | No | Default Game Dev Memory project UUID |
+| `STORY_TOKEN` | No | PajamaDot Story Platform token (`sp_live_...`) for `story` CLI |
 | `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 | `WORKER_URL` | No | Public URL of the worker (required for CDP) |
 

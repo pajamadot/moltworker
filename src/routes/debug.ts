@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { findExistingMoltbotProcess, waitForProcess } from '../gateway';
+import { TimeoutError } from '../utils/timeout';
 
 /**
  * Debug routes for inspecting container state
@@ -8,6 +9,13 @@ import { findExistingMoltbotProcess, waitForProcess } from '../gateway';
  * when mounted in the main app
  */
 const debug = new Hono<AppEnv>();
+
+function redactSecretsFromText(text: string, secrets: Array<string | undefined>): string {
+  const values = secrets.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  let out = text;
+  for (const s of values) out = out.split(s).join('[REDACTED]');
+  return out;
+}
 
 // GET /debug/version - Returns version info from inside the container
 debug.get('/version', async (c) => {
@@ -42,6 +50,24 @@ debug.get('/processes', async (c) => {
     const processes = await sandbox.listProcesses();
     const includeLogs = c.req.query('logs') === 'true';
 
+    const secretsToRedact = [
+      c.env.MOLTBOT_GATEWAY_TOKEN,
+      c.env.ANTHROPIC_API_KEY,
+      c.env.OPENAI_API_KEY,
+      c.env.AI_GATEWAY_API_KEY,
+      c.env.CLOUDFLARE_AI_GATEWAY_API_KEY,
+      c.env.TELEGRAM_BOT_TOKEN,
+      c.env.DISCORD_BOT_TOKEN,
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_APP_TOKEN,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
+      c.env.GDM_API_TOKEN,
+      c.env.STORY_TOKEN,
+      c.env.FEISHU_APP_ID,
+      c.env.FEISHU_APP_SECRET,
+    ];
+
     const processData = await Promise.all(
       processes.map(async (p) => {
         const data: Record<string, unknown> = {
@@ -56,8 +82,8 @@ debug.get('/processes', async (c) => {
         if (includeLogs) {
           try {
             const logs = await p.getLogs();
-            data.stdout = logs.stdout || '';
-            data.stderr = logs.stderr || '';
+            data.stdout = redactSecretsFromText(logs.stdout || '', secretsToRedact);
+            data.stderr = redactSecretsFromText(logs.stderr || '', secretsToRedact);
           } catch {
             data.logs_error = 'Failed to retrieve logs';
           }
@@ -135,13 +161,30 @@ debug.get('/cli', async (c) => {
     await waitForProcess(proc, 120000);
 
     const logs = await proc.getLogs();
+    const secretsToRedact = [
+      c.env.MOLTBOT_GATEWAY_TOKEN,
+      c.env.ANTHROPIC_API_KEY,
+      c.env.OPENAI_API_KEY,
+      c.env.AI_GATEWAY_API_KEY,
+      c.env.CLOUDFLARE_AI_GATEWAY_API_KEY,
+      c.env.TELEGRAM_BOT_TOKEN,
+      c.env.DISCORD_BOT_TOKEN,
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_APP_TOKEN,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
+      c.env.GDM_API_TOKEN,
+      c.env.STORY_TOKEN,
+      c.env.FEISHU_APP_ID,
+      c.env.FEISHU_APP_SECRET,
+    ];
     const status = proc.getStatus ? await proc.getStatus() : proc.status;
     return c.json({
       command: cmd,
       status,
       exitCode: proc.exitCode,
-      stdout: logs.stdout || '',
-      stderr: logs.stderr || '',
+      stdout: redactSecretsFromText(logs.stdout || '', secretsToRedact),
+      stderr: redactSecretsFromText(logs.stderr || '', secretsToRedact),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -171,7 +214,22 @@ debug.get('/logs', async (c) => {
         );
       }
     } else {
-      process = await findExistingMoltbotProcess(sandbox);
+      try {
+        process = await findExistingMoltbotProcess(sandbox);
+      } catch (e) {
+        if (e instanceof TimeoutError) {
+          return c.json(
+            {
+              status: 'busy',
+              message: 'Sandbox is busy (listProcesses timed out). Try again.',
+              stdout: '',
+              stderr: '',
+            },
+            503,
+          );
+        }
+        throw e;
+      }
       if (!process) {
         return c.json({
           status: 'no_process',
@@ -183,12 +241,29 @@ debug.get('/logs', async (c) => {
     }
 
     const logs = await process.getLogs();
+    const secretsToRedact = [
+      c.env.MOLTBOT_GATEWAY_TOKEN,
+      c.env.ANTHROPIC_API_KEY,
+      c.env.OPENAI_API_KEY,
+      c.env.AI_GATEWAY_API_KEY,
+      c.env.CLOUDFLARE_AI_GATEWAY_API_KEY,
+      c.env.TELEGRAM_BOT_TOKEN,
+      c.env.DISCORD_BOT_TOKEN,
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_APP_TOKEN,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
+      c.env.GDM_API_TOKEN,
+      c.env.STORY_TOKEN,
+      c.env.FEISHU_APP_ID,
+      c.env.FEISHU_APP_SECRET,
+    ];
     return c.json({
       status: 'ok',
       process_id: process.id,
       process_status: process.status,
-      stdout: logs.stdout || '',
-      stderr: logs.stderr || '',
+      stdout: redactSecretsFromText(logs.stdout || '', secretsToRedact),
+      stderr: redactSecretsFromText(logs.stderr || '', secretsToRedact),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

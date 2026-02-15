@@ -1,0 +1,3 @@
+# Ensure Linux-executed scripts keep LF line endings (Cloudflare Sandbox runs Linux).
+*.sh text eol=lf
+

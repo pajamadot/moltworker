@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, startMoltbotGateway } from '../gateway';
+import { TimeoutError, withTimeout } from '../utils/timeout';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -30,28 +31,211 @@ publicRoutes.get('/logo-small.png', (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
 
+// OpenClaw Control UI assets (favicon, etc.)
+// These files are referenced by the gateway UI HTML at "/".
+publicRoutes.get('/favicon.svg', (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+publicRoutes.get('/favicon-32.png', (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+// Many browsers still probe /favicon.ico by default. Serve our favicon there too.
+publicRoutes.get('/favicon.ico', (c) => {
+  const url = new URL(c.req.url);
+  const assetUrl = new URL('/favicon-32.png', url.origin);
+  return c.env.ASSETS.fetch(new Request(assetUrl.toString(), c.req.raw));
+});
+publicRoutes.get('/apple-touch-icon.png', (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
+// GET /oauth/discord/callback - Optional OAuth2 redirect landing page (public)
+//
+// This is only needed if you add `redirect_uri` to your Discord OAuth2 URL (e.g. an "install" link
+// that returns the user to your domain). Moltworker/OpenClaw does NOT require Discord OAuth2 for
+// normal bot-token operation, but having a safe landing page reduces setup confusion.
+publicRoutes.get('/oauth/discord/callback', (c) => {
+  const url = new URL(c.req.url);
+  const error = url.searchParams.get('error');
+  const errorDesc = url.searchParams.get('error_description');
+
+  const adminUrl = new URL('/_admin/', url.origin).toString();
+  const rootUrl = new URL('/', url.origin).toString();
+
+  // Never echo OAuth codes/tokens back into the page.
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discord Redirect</title>
+    <style>
+      :root { color-scheme: dark light; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 24px; }
+      .card { max-width: 720px; margin: 0 auto; padding: 20px; border: 1px solid rgba(0,0,0,0.12); border-radius: 12px; }
+      h1 { margin: 0 0 10px; font-size: 20px; }
+      p { margin: 0 0 10px; line-height: 1.5; opacity: 0.9; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.95em; }
+      .links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+      a { display: inline-block; padding: 10px 12px; border-radius: 10px; text-decoration: none; border: 1px solid rgba(0,0,0,0.18); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${error ? 'Discord authorization failed' : 'Discord authorization complete'}</h1>
+      ${
+        error
+          ? `<p><strong>Error:</strong> <code>${error}</code></p>${
+              errorDesc ? `<p>${errorDesc}</p>` : ''
+            }`
+          : `<p>You can close this tab. If you are setting up the bot with DM pairing, the next step is to approve the pairing code in the admin UI.</p>
+             <p>Admin UI: <code>${adminUrl}</code></p>`
+      }
+      <div class="links">
+        <a href="${adminUrl}">Open Admin UI</a>
+        <a href="${rootUrl}">Open Control UI</a>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+  return c.html(html);
+});
+
 // GET /api/status - Public health check for gateway status (no auth required)
 publicRoutes.get('/api/status', async (c) => {
   const sandbox = c.get('sandbox');
+  const url = new URL(c.req.url);
+  const now = Date.now();
+
+  const wantDetails = url.searchParams.get('details') === 'true' || url.searchParams.get('debug') === '1';
+  const token = url.searchParams.get('token');
+  const allowDetails =
+    wantDetails &&
+    typeof token === 'string' &&
+    token.length > 0 &&
+    !!c.env.MOLTBOT_GATEWAY_TOKEN &&
+    token === c.env.MOLTBOT_GATEWAY_TOKEN;
+
+  function redactSecrets(input: string): string {
+    const secrets = [
+      c.env.MOLTBOT_GATEWAY_TOKEN,
+      c.env.ANTHROPIC_API_KEY,
+      c.env.OPENAI_API_KEY,
+      c.env.AI_GATEWAY_API_KEY,
+      c.env.CLOUDFLARE_AI_GATEWAY_API_KEY,
+      c.env.TELEGRAM_BOT_TOKEN,
+      c.env.DISCORD_BOT_TOKEN,
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_APP_TOKEN,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
+      c.env.FEISHU_APP_ID,
+      c.env.FEISHU_APP_SECRET,
+      c.env.GDM_API_TOKEN,
+      c.env.STORY_TOKEN,
+    ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+    let out = input;
+    for (const s of secrets) out = out.split(s).join('[REDACTED]');
+    return out;
+  }
+
+  function tail(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(text.length - maxChars);
+  }
 
   try {
-    const process = await findExistingMoltbotProcess(sandbox);
+    // Bound sandbox interactions so the status endpoint never hangs the loading page,
+    // even if the sandbox DO is busy with another long-running operation.
+    const process = await withTimeout(findExistingMoltbotProcess(sandbox), 2500, 'findExistingMoltbotProcess');
     if (!process) {
-      return c.json({ ok: false, status: 'not_running' });
+      // Kick off a background start so the loading page can self-heal.
+      c.executionCtx.waitUntil(
+        startMoltbotGateway(sandbox, c.env).catch((err) => {
+          console.error('[STATUS] Background start failed:', err);
+        }),
+      );
+      return c.json({ ok: false, status: 'not_running', starting: true });
     }
+
+    const startedAt = process.startTime ? process.startTime.toISOString() : undefined;
+    const uptimeMs = process.startTime ? now - process.startTime.getTime() : undefined;
 
     // Process exists, check if it's actually responding
     // Try to reach the gateway with a short timeout
     try {
-      await process.waitForPort(18789, { mode: 'tcp', timeout: 5000 });
-      return c.json({ ok: true, status: 'running', processId: process.id });
-    } catch {
-      return c.json({ ok: false, status: 'not_responding', processId: process.id });
+      await withTimeout(
+        process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 500 }),
+        1200,
+        'process.waitForPort',
+      );
+
+      // When authorized, include a small log tail to make remote debugging possible
+      // without needing Cloudflare Access (still gated by the gateway token).
+      if (allowDetails) {
+        try {
+          const logs = await withTimeout(process.getLogs(), 2500, 'process.getLogs');
+          return c.json({
+            ok: true,
+            status: 'running',
+            processId: process.id,
+            startedAt,
+            uptimeMs,
+            logs: {
+              stdout: tail(redactSecrets(logs.stdout || ''), 8000),
+              stderr: tail(redactSecrets(logs.stderr || ''), 8000),
+            },
+          });
+        } catch (logErr) {
+          return c.json({
+            ok: true,
+            status: 'running',
+            processId: process.id,
+            startedAt,
+            uptimeMs,
+            logs_error: logErr instanceof Error ? logErr.message : 'Failed to retrieve logs',
+          });
+        }
+      }
+
+      return c.json({ ok: true, status: 'running', processId: process.id, startedAt, uptimeMs });
+    } catch (err) {
+      const base = {
+        ok: false,
+        status: 'not_responding',
+        processId: process.id,
+        processStatus: process.status,
+        startedAt,
+        uptimeMs,
+      } as Record<string, unknown>;
+
+      if (allowDetails) {
+        try {
+          const logs = await withTimeout(process.getLogs(), 2500, 'process.getLogs');
+          base.logs = {
+            stdout: tail(redactSecrets(logs.stdout || ''), 8000),
+            stderr: tail(redactSecrets(logs.stderr || ''), 8000),
+          };
+        } catch (logErr) {
+          base.logs_error = logErr instanceof Error ? logErr.message : 'Failed to retrieve logs';
+        }
+      } else if (wantDetails) {
+        base.details = 'Set ?token=... (gateway token) to view logs';
+      }
+
+      // If sandbox calls are timing out, surface that as a "busy" state for better UX.
+      if (err instanceof TimeoutError) {
+        base.status = 'busy';
+      }
+
+      return c.json(base);
     }
   } catch (err) {
     return c.json({
       ok: false,
-      status: 'error',
+      status: err instanceof TimeoutError ? 'busy' : 'error',
       error: err instanceof Error ? err.message : 'Unknown error',
     });
   }
