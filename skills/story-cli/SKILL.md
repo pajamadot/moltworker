@@ -29,6 +29,15 @@ cd story-cli && cargo build --release
 cargo install --path story-cli --force
 ```
 
+## Agent Wrapper (OpenClaw Container)
+
+In this `moltworker` container image, the `story` CLI is preinstalled. The container boot script also writes secrets to `/root/.openclaw/.env`. For agent-run subprocesses that may not inherit the full environment, use the wrapper:
+
+```bash
+node /root/.openclaw/skills/story-cli/scripts/story.cjs health
+node /root/.openclaw/skills/story-cli/scripts/story.cjs project list --json
+```
+
 ### How npm Install Works
 
 The npm package is a thin shim (`bin/story.js`) + `postinstall.js`. At install time, postinstall downloads the platform-correct binary from `https://releases.pajamadot.com/cli/v{VERSION}/{target}`, verifies the SHA256 checksum, and places it in `bin/`. No native compilation needed.

@@ -35,6 +35,15 @@ story login
 export STORY_TOKEN="sp_live_..."
 ```
 
+## Agent Wrapper (Recommended in OpenClaw Container)
+
+The container boot script writes secrets to `/root/.openclaw/.env`. If an agent-run subprocess does not inherit the full environment, use the wrapper which loads that file before spawning the `story` CLI:
+
+```bash
+node /root/.openclaw/skills/story-cli/scripts/story.cjs health
+node /root/.openclaw/skills/story-cli/scripts/story.cjs project list --json
+```
+
 ## Context
 
 Set active project/story to avoid passing IDs on every call:
@@ -156,4 +165,4 @@ story export renpy > script.rpy
 - Use `story health` to check API connectivity (no auth required)
 - Use `story update` to update to latest version
 - Use `story credits balance` to check remaining generation credits
-- Environment variables: `STORY_TOKEN`, `STORY_API_URL`, `STORY_CDN_URL`
+- Environment variables: `STORY_TOKEN`, `STORY_API_URL`, `STORY_ASSET_URL`, `STORY_GENERATION_URL`, `STORY_AUTH_URL`, `STORY_CDN_URL`, `STORY_OAUTH_CALLBACK_TIMEOUT_SECS`

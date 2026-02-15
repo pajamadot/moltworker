@@ -23,21 +23,21 @@ story --version
 List projects:
 
 ```bash
-node {baseDir}/scripts/story.js project list --json
+node {baseDir}/scripts/story.cjs project list --json
 ```
 
 Set the active project/story (so you can omit IDs on later commands):
 
 ```bash
-node {baseDir}/scripts/story.js use project <project-id>
-node {baseDir}/scripts/story.js use story <story-id>
+node {baseDir}/scripts/story.cjs use project <project-id>
+node {baseDir}/scripts/story.cjs use story <story-id>
 ```
 
 Create a project + story:
 
 ```bash
-node {baseDir}/scripts/story.js project create --name "ClayClaw VN" --description "ClayClaw story workspace"
-node {baseDir}/scripts/story.js story create --title "Chapter 1" --genre romance
+node {baseDir}/scripts/story.cjs project create --name "ClayClaw VN" --description "ClayClaw story workspace"
+node {baseDir}/scripts/story.cjs story create --title "Chapter 1" --genre romance
 ```
 
 ## Notes
