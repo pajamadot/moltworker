@@ -2,30 +2,73 @@
 
 Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
 
+## PajamaDot Fork (vs `cloudflare/moltworker`)
+
+This repository is a fork of `cloudflare/moltworker`. The upstream project is a minimal proof-of-concept; this fork adds production-focused features and PajamaDot/ClayClaw integrations.
+
+Keep this section updated when we change user-facing behavior (routes, environment variables, startup/persistence behavior, built-in skills).
+
+### High-Level Differences
+
+- **OpenClaw-first + legacy migration**: Uses `.openclaw/` paths and supports restoring/migrating legacy `.clawdbot/` backups.
+- **Cold-start readiness UX**: Public `/api/status` endpoint and a loading page that polls until the gateway is ready (avoids hanging admin/auth flows during container boot).
+- **Auth improvements**: Supports comma-separated `CF_ACCESS_AUD` values, plus `E2E_TEST_MODE` to skip Cloudflare Access auth without disabling device pairing.
+- **Gateway startup hardening**: Non-blocking gateway start + short readiness probes (reduces Durable Object lockups), and a time-bounded `openclaw doctor --fix` during container boot.
+- **More channels**: Adds Feishu/Lark support (in addition to Telegram/Discord/Slack), plus pairing endpoints for DM flows.
+- **Agent tooling**: Adds `clayclaw-memory`, `pajamadot-story`, and `story-cli` skills, with wrapper scripts that load `/root/.openclaw/.env` for agent subprocesses.
+- **Branding + icons**: ClayClaw title/assistant branding and worker-served favicon/app icons used by the Control UI.
+
+<details>
+<summary>Detailed upstream delta (commits currently ahead of upstream/main)</summary>
+
+#### `8a43496` (2026-02-14) feat: OpenClaw worker upgrades
+
+- **Worker routing + cold-start UX:**
+- Added public readiness endpoints (`/api/status`, `/sandbox-health`) and public static asset routing needed during auth/cold-start (`/_admin/assets/*`, favicons).
+- Added a loading page that polls `/api/status` so the Control UI can survive cold starts without hanging the sandbox Durable Object.
+- Added token-gated status details (`/api/status?details=true&token=...`) for remote log tail debugging without needing Cloudflare Access.
+- **Auth + gateway lifecycle:**
+- Added `E2E_TEST_MODE` (skip Cloudflare Access auth but keep device pairing).
+- Cloudflare Access: support comma-separated `CF_ACCESS_AUD` values (multiple Access applications).
+- Hardened gateway start logic to be non-blocking and to use short probes/timeouts to avoid Durable Object contention during startup.
+- **Container startup + persistence:**
+- Added R2 restore/migration: prefers `openclaw/` prefix, falls back to legacy `clawdbot/` and migrates config on boot.
+- Writes a runtime `/root/.openclaw/.env` from container env vars for agent subprocesses; excludes `.env` from R2 sync.
+- Time-bounded `openclaw doctor --fix` during startup to avoid infinite hangs.
+- OpenClaw config patching at boot: trusted proxies, gateway token auth, Control UI assistant branding, and default skill enablement.
+- **Channels + integrations:**
+- Added Feishu/Lark env vars + config patching and documented setup.
+- Added built-in skills: `clayclaw-memory` (Game Dev Memory) and PajamaDot Story CLI docs/wrappers.
+- **Tooling + build hygiene:**
+- Added `.dockerignore` and `.gitattributes` (enforce LF for `.sh`); added Control UI icons served by the worker.
+- Bumped Wrangler (and regenerated lockfile) as part of the upgrade.
+
+#### `883b22e` (2026-02-15) feat: improve Story CLI agent wrapper
+
+- Added `skills/story-cli/scripts/story.cjs` wrapper that loads `~/.openclaw/.env` before spawning `story`.
+- Updated `pajamadot-story` wrapper similarly, and renamed wrappers to `.cjs` to work in this repo's `"type": "module"` setup.
+- Updated skill docs to reflect the agent wrapper workflow.
+
+#### `3edfd18` (2026-02-15) chore: bump story-cli to v0.2.4
+
+- Updated the container image to install `@pajamadot/story-cli@0.2.4`.
+
+#### `8131271` (2026-02-15) docs: document PajamaDot fork changes
+
+- Added a fork-diff summary to the README and a reminder in `AGENTS.md` to keep it current.
+
+</details>
+
 ![moltworker architecture](./assets/logo.png)
 
 > **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pajamadot/moltworker)
 
-## PajamaDot Fork Changes
-
-This repository is a fork of `cloudflare/moltworker`. The upstream project is a minimal proof-of-concept; this fork adds production-focused features and PajamaDot/ClayClaw integrations.
-
-Notable differences from upstream:
-
-- **OpenClaw-first + legacy migration**: Uses `.openclaw/` paths and supports restoring/migrating legacy `.clawdbot/` backups.
-- **Improved cold-start UX**: Public `/api/status` endpoint and a loading page that polls until the gateway is ready (avoids hanging admin/auth flows during container boot).
-- **Auth + ops knobs**: `E2E_TEST_MODE`, public health endpoints, and safer gateway start logic (non-blocking start with readiness probing).
-- **More channels**: Adds Feishu/Lark support (in addition to Telegram/Discord/Slack).
-- **Built-in skills for agents**: Adds `clayclaw-memory`, `pajamadot-story`, and `story-cli` (with wrapper scripts that load `/root/.openclaw/.env` for agent subprocesses).
-- **Hardened container startup**: Writes a runtime `.env`, bounds `openclaw doctor --fix` so startup can't hang forever, and enforces LF line endings for shell scripts via `.gitattributes`.
-- **Branding + icons**: ClayClaw title/assistant branding and worker-served favicon/app icons used by the Control UI.
-
 ## Requirements
 
-- [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers
-- [Anthropic API key](https://console.anthropic.com/) — for Claude access, or you can use AI Gateway's [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)
+- [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) - required for Cloudflare Sandbox containers
+- [Anthropic API key](https://console.anthropic.com/) - for Claude access, or you can use AI Gateway's [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)
 
 The following Cloudflare features used by this project have free tiers:
 - Cloudflare Access (authentication)
@@ -136,7 +179,7 @@ The easiest way to protect your worker is using the built-in Cloudflare Access i
 2. Select your Worker (e.g., `moltbot-sandbox`)
 3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
 4. Click **Enable Cloudflare Access**
-5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
+5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 - ignore it.
 6. To configure who can access, go to **Zero Trust** in the Cloudflare dashboard sidebar → **Access** → **Applications**, and find your worker's application:
    - Add your email address to the allow list
    - Or configure other identity providers (Google, GitHub, etc.)
@@ -433,7 +476,7 @@ See `skills/story-cli/SKILL.md` for usage.
 
 You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. OpenClaw has native support for Cloudflare AI Gateway as a first-class provider.
 
-AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. You still need a provider API key (e.g., your Anthropic API key) — the gateway forwards it to the upstream provider.
+AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. You still need a provider API key (e.g., your Anthropic API key) - the gateway forwards it to the upstream provider.
 
 ### Setup
 
@@ -480,11 +523,11 @@ This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-g
 | Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API key |
 | Groq | `groq/llama-3.3-70b` | Groq API key |
 
-**Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using — it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
+**Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using - it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
 
 #### Workers AI with Unified Billing
 
-With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), you can use Workers AI models without a separate provider API key — Cloudflare bills you directly. Set `CLOUDFLARE_AI_GATEWAY_API_KEY` to your [AI Gateway authentication token](https://developers.cloudflare.com/ai-gateway/configuration/authentication/) (the `cf-aig-authorization` token).
+With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), you can use Workers AI models without a separate provider API key - Cloudflare bills you directly. Set `CLOUDFLARE_AI_GATEWAY_API_KEY` to your [AI Gateway authentication token](https://developers.cloudflare.com/ai-gateway/configuration/authentication/) (the `cf-aig-authorization` token).
 
 ### Legacy AI Gateway Configuration
 
@@ -569,7 +612,7 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 ### Windows: Gateway fails to start with exit code 126 (permission denied)
 
-On Windows, Git may check out shell scripts with CRLF line endings instead of LF. This causes `start-openclaw.sh` to fail with exit code 126 inside the Linux container. Ensure your repository uses LF line endings — configure Git with `git config --global core.autocrlf input` or add a `.gitattributes` file with `* text=auto eol=lf`. See [#64](https://github.com/cloudflare/moltworker/issues/64) for details.
+On Windows, Git may check out shell scripts with CRLF line endings instead of LF. This causes `start-openclaw.sh` to fail with exit code 126 inside the Linux container. Ensure your repository uses LF line endings - configure Git with `git config --global core.autocrlf input` or add a `.gitattributes` file with `* text=auto eol=lf`. See [#64](https://github.com/cloudflare/moltworker/issues/64) for details.
 
 ## Links
 
